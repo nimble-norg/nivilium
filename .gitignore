@@ -1,0 +1,6 @@
+vi
+main.o
+terminal.o
+buffer.o
+screen.o
+modes.o
