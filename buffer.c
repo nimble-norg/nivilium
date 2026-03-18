@@ -103,7 +103,6 @@ void load_file(const char *fname)
     while (fgets(buf, sizeof(buf), f)) {
         int l = (int)strlen(buf);
         if (l > 0 && buf[l - 1] == '\n') buf[--l] = '\0';
-
         insert_line_at(E.nlines);
         if (l > 0) {
             Line *cur = &E.lines[E.nlines - 1];
@@ -125,6 +124,11 @@ void load_file(const char *fname)
 
 void save_file(const char *fname)
 {
+    if (E.readonly) {
+        snprintf(E.statusmsg, sizeof(E.statusmsg),
+                 "E45: 'readonly' option is set (use ! to override)");
+        return;
+    }
     FILE *f = fopen(fname, "w");
     if (!f) {
         snprintf(E.statusmsg, sizeof(E.statusmsg),

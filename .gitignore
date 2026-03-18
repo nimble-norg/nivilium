@@ -1,6 +1,11 @@
-vi
 main.o
 terminal.o
 buffer.o
 screen.o
 modes.o
+signals.o
+env.o
+ex.o
+shell.o
+vi
+ex

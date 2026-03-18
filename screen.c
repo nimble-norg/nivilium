@@ -20,14 +20,16 @@ static void build_status_bar(Abuf *ab)
     int  llen, rlen;
 
     const char *mname = "";
-    if (E.mode == MODE_INSERT) mname = "-- INSERT --";
-    if (E.mode == MODE_SEARCH) mname = "-- SEARCH --";
+    if (E.mode == MODE_INSERT)  mname = "-- INSERT --";
+    if (E.mode == MODE_REPLACE) mname = "-- REPLACE --";
+    if (E.mode == MODE_SEARCH)  mname = "-- SEARCH --";
 
-    const char *fname = E.filename[0] ? E.filename : "[No Name]";
-    char dirty_flag   = E.dirty ? '+' : ' ';
+    const char *fname  = E.filename[0] ? E.filename : "[No Name]";
+    const char *ronly  = E.readonly ? " [RO]" : "";
+    char dirty_flag    = E.dirty ? '+' : ' ';
 
-    llen = snprintf(left, sizeof(left), " %-12s  %.40s %c",
-                    mname, fname, dirty_flag);
+    llen = snprintf(left, sizeof(left), " %-13s %.36s%s %c",
+                    mname, fname, ronly, dirty_flag);
     if (llen < 0) llen = 0;
 
     char pct[16];
@@ -90,13 +92,19 @@ static void build_command_line(Abuf *ab)
             ab_append(ab, E.ex_buf, show);
         }
     } else if (E.mode == MODE_SEARCH) {
-        ab_append(ab, "/", 1);
+        ab_append(ab, E.search_dir > 0 ? "/" : "?", 1);
         if (E.search_len > 0) {
             int show = E.search_len < E.cols - 1 ? E.search_len : E.cols - 1;
             ab_append(ab, E.search_buf, show);
         }
+    } else if (E.mode == MODE_BANG) {
+        ab_append(ab, "!", 1);
+        if (E.bang_len > 0) {
+            int show = E.bang_len < E.cols - 1 ? E.bang_len : E.cols - 1;
+            ab_append(ab, E.bang_buf, show);
+        }
     } else if (E.statusmsg[0]) {
-        int ml = (int)strlen(E.statusmsg);
+        int ml   = (int)strlen(E.statusmsg);
         int show = ml < E.cols ? ml : E.cols;
         ab_append(ab, E.statusmsg, show);
     }
@@ -144,6 +152,10 @@ void draw_screen(void)
         n = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.rows + 2, col);
     } else if (E.mode == MODE_SEARCH) {
         int col = E.search_len + 2;
+        if (col > E.cols) col = E.cols;
+        n = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.rows + 2, col);
+    } else if (E.mode == MODE_BANG) {
+        int col = E.bang_len + 2;
         if (col > E.cols) col = E.cols;
         n = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.rows + 2, col);
     } else {

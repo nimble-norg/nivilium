@@ -8,18 +8,15 @@ static void die(const char *msg)
     exit(1);
 }
 
-static void disable_raw(void)
+void disable_raw_mode(void)
 {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios);
     write(STDOUT_FILENO, "\x1b[2J", 4);
     write(STDOUT_FILENO, "\x1b[H",  3);
 }
 
-void enable_raw(void)
+void reenable_raw_mode(void)
 {
-    if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1) die("tcgetattr");
-    atexit(disable_raw);
-
     struct termios raw = E.orig_termios;
     raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
     raw.c_oflag &= ~(OPOST);
@@ -27,14 +24,14 @@ void enable_raw(void)
     raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
     raw.c_cc[VMIN]  = 0;
     raw.c_cc[VTIME] = 1;
-
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
 
-static void sigwinch_handler(int sig)
+void enable_raw(void)
 {
-    (void)sig;
-    E.need_resize = 1;
+    if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1) die("tcgetattr");
+    atexit(disable_raw_mode);
+    reenable_raw_mode();
 }
 
 void get_window_size(void)
@@ -49,8 +46,6 @@ void get_window_size(void)
     }
     if (E.rows < 1)  E.rows = 1;
     if (E.cols < 10) E.cols = 10;
-
-    signal(SIGWINCH, sigwinch_handler);
 }
 
 int read_key(void)
@@ -59,29 +54,61 @@ int read_key(void)
     char c;
 
     while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
+        if (nread == -1 && errno == EINTR) {
+            check_signals();
+            continue;
+        }
         if (nread < 0) die("read");
-        if (E.need_resize) {
-            E.need_resize = 0;
-            get_window_size();
-            draw_screen();
-        }
+        check_signals();
     }
 
-    if (c == '\x1b') {
-        char seq[4] = {0, 0, 0, 0};
-        if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
-        if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
+    if (c != '\x1b') return (unsigned char)c;
 
-        if (seq[0] == '[') {
-            switch (seq[1]) {
-                case 'A': return KEY_UP;
-                case 'B': return KEY_DOWN;
-                case 'C': return KEY_RIGHT;
-                case 'D': return KEY_LEFT;
+    char seq[6] = {0};
+    if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
+    if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
+
+    if (seq[0] == '[') {
+        if (seq[1] >= '0' && seq[1] <= '9') {
+            if (read(STDIN_FILENO, &seq[2], 1) != 1) return '\x1b';
+            if (seq[2] == '~') {
+                switch (seq[1]) {
+                    case '1': return KEY_HOME;
+                    case '4': return KEY_END;
+                    case '5': return KEY_PPAGE;
+                    case '6': return KEY_NPAGE;
+                    case '3': return KEY_DEL;
+                    case '7': return KEY_HOME;
+                    case '8': return KEY_END;
+                }
             }
+            if (seq[2] == ';') {
+                char seq2[3] = {0};
+                if (read(STDIN_FILENO, &seq2[0], 1) != 1) return '\x1b';
+                if (read(STDIN_FILENO, &seq2[1], 1) != 1) return '\x1b';
+            }
+            return '\x1b';
         }
-        return '\x1b';
+        switch (seq[1]) {
+            case 'A': return KEY_UP;
+            case 'B': return KEY_DOWN;
+            case 'C': return KEY_RIGHT;
+            case 'D': return KEY_LEFT;
+            case 'H': return KEY_HOME;
+            case 'F': return KEY_END;
+        }
     }
 
-    return (unsigned char)c;
+    if (seq[0] == 'O') {
+        switch (seq[1]) {
+            case 'H': return KEY_HOME;
+            case 'F': return KEY_END;
+            case 'A': return KEY_UP;
+            case 'B': return KEY_DOWN;
+            case 'C': return KEY_RIGHT;
+            case 'D': return KEY_LEFT;
+        }
+    }
+
+    return '\x1b';
 }
