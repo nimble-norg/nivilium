@@ -53,6 +53,28 @@ static void print_lines(int line1, int line2, int with_nums)
     }
 }
 
+static void list_lines(int line1, int line2)
+{
+    if (E.batch_mode) return;
+    for (int i = line1; i <= line2 && i < E.nlines; i++) {
+        Line *l = &E.lines[i];
+        for (int j = 0; j < l->len; j++) {
+            unsigned char c = (unsigned char)l->data[j];
+            if (c == '\t') {
+                write(STDOUT_FILENO, "^I", 2);
+            } else if (c < 32) {
+                char tmp[4];
+                tmp[0] = '^';
+                tmp[1] = (char)(c + '@');
+                write(STDOUT_FILENO, tmp, 2);
+            } else {
+                write(STDOUT_FILENO, &l->data[j], 1);
+            }
+        }
+        write(STDOUT_FILENO, "$\n", 2);
+    }
+}
+
 static int parse_one_addr(const char *s, int *consumed)
 {
     int i = 0;
@@ -99,10 +121,7 @@ static void parse_range(const char *s, int *line1, int *line2,
             while (s[c] == ' ') c++;
             int c2;
             int a2 = parse_one_addr(s + c, &c2);
-            if (c2 > 0) {
-                *line2 = a2;
-                c     += c2;
-            }
+            if (c2 > 0) { *line2 = a2; c += c2; }
         }
     }
     *consumed = c;
@@ -113,8 +132,7 @@ static void do_substitute(int line1, int line2,
                           const char *rep, int rep_len,
                           int global)
 {
-    char pat_str[256];
-    char rep_str[256];
+    char pat_str[256], rep_str[256];
 
     if (!pat || pat_len == 0) {
         if (E.last_sub_pat_len <= 0) {
@@ -122,22 +140,17 @@ static void do_substitute(int line1, int line2,
             return;
         }
         int n = E.last_sub_pat_len < 255 ? E.last_sub_pat_len : 255;
-        memcpy(pat_str, E.last_sub_pat, n);
-        pat_str[n] = '\0';
+        memcpy(pat_str, E.last_sub_pat, n); pat_str[n] = '\0';
         n = E.last_sub_rep_len < 255 ? E.last_sub_rep_len : 255;
-        memcpy(rep_str, E.last_sub_rep, n);
-        rep_str[n] = '\0';
-        global     = E.last_sub_global;
+        memcpy(rep_str, E.last_sub_rep, n); rep_str[n] = '\0';
+        global = E.last_sub_global;
     } else {
         int n = pat_len < 255 ? pat_len : 255;
-        memcpy(pat_str, pat, n);
-        pat_str[n] = '\0';
+        memcpy(pat_str, pat, n); pat_str[n] = '\0';
         memcpy(E.last_sub_pat, pat_str, n + 1);
         E.last_sub_pat_len = n;
-
         n = rep_len < 255 ? rep_len : 255;
-        memcpy(rep_str, rep, n);
-        rep_str[n] = '\0';
+        memcpy(rep_str, rep, n); rep_str[n] = '\0';
         memcpy(E.last_sub_rep, rep_str, n + 1);
         E.last_sub_rep_len = n;
         E.last_sub_global  = global;
@@ -149,9 +162,7 @@ static void do_substitute(int line1, int line2,
         return;
     }
 
-    int total_subs    = 0;
-    int lines_changed = 0;
-
+    int total_subs = 0, lines_changed = 0;
     save_undo();
 
     for (int i = line1; i <= line2 && i < E.nlines; i++) {
@@ -163,8 +174,7 @@ static void do_substitute(int line1, int line2,
         char newbuf[8192];
         int  newlen = 0;
         const char *src = lc;
-        int  did_sub = 0;
-        int  first   = 1;
+        int  did_sub = 0, first = 1;
 
         while (1) {
             regmatch_t m;
@@ -178,19 +188,17 @@ static void do_substitute(int line1, int line2,
                 }
                 break;
             }
-
             if (newlen + (int)m.rm_so < (int)sizeof(newbuf) - 1) {
                 memcpy(newbuf + newlen, src, m.rm_so);
                 newlen += (int)m.rm_so;
             }
-
             const char *rp = rep_str;
             while (*rp && newlen < (int)sizeof(newbuf) - 2) {
                 if (*rp == '&') {
-                    int mlen = (int)(m.rm_eo - m.rm_so);
-                    if (newlen + mlen < (int)sizeof(newbuf) - 1) {
-                        memcpy(newbuf + newlen, src + m.rm_so, mlen);
-                        newlen += mlen;
+                    int ml = (int)(m.rm_eo - m.rm_so);
+                    if (newlen + ml < (int)sizeof(newbuf) - 1) {
+                        memcpy(newbuf + newlen, src + m.rm_so, ml);
+                        newlen += ml;
                     }
                     rp++;
                 } else if (*rp == '\\' && *(rp + 1)) {
@@ -200,11 +208,8 @@ static void do_substitute(int line1, int line2,
                     newbuf[newlen++] = *rp++;
                 }
             }
-
-            total_subs++;
-            did_sub = 1;
-            src    += m.rm_eo;
-
+            total_subs++; did_sub = 1;
+            src += m.rm_eo;
             if (!global || m.rm_eo == m.rm_so) {
                 int rem = (int)strlen(src);
                 if (newlen + rem < (int)sizeof(newbuf) - 1) {
@@ -228,18 +233,14 @@ static void do_substitute(int line1, int line2,
             lines_changed++;
         }
     }
-
     regfree(&re);
 
-    if (total_subs == 0) {
+    if (total_subs == 0)
         ex_outf("E486: Pattern not found: %s", pat_str);
-    } else {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "%d substitution%s on %d line%s",
-                 total_subs,    total_subs    != 1 ? "s" : "",
-                 lines_changed, lines_changed != 1 ? "s" : "");
-        ex_out(msg);
-    }
+    else
+        ex_outf("%d substitution%s on %d line%s",
+                total_subs,    total_subs    != 1 ? "s" : "",
+                lines_changed, lines_changed != 1 ? "s" : "");
 }
 
 static void do_global(int line1, int line2,
@@ -267,12 +268,8 @@ static void do_global(int line1, int line2,
         free(lc);
     }
     regfree(&re);
-
     for (int i = 0; i < E.nlines; i++) {
-        if (mark[i]) {
-            E.cy = i;
-            dispatch_ex_cmd(excmd);
-        }
+        if (mark[i]) { E.cy = i; dispatch_ex_cmd(excmd); }
     }
     free(mark);
 }
@@ -283,38 +280,29 @@ static void cmd_sub(int line1, int line2, const char *args)
         do_substitute(line1, line2, NULL, 0, NULL, 0, E.last_sub_global);
         return;
     }
-
     char delim = args[0];
     if (delim != '/' && delim != ',' && delim != '!' && delim != '@') {
         do_substitute(line1, line2, NULL, 0, NULL, 0, E.last_sub_global);
         return;
     }
-
     const char *p = args + 1;
     char pat[256]; int pat_len = 0;
     while (*p && *p != delim) {
         if (*p == '\\' && *(p + 1) == delim) {
             if (pat_len < 255) pat[pat_len++] = delim;
             p += 2;
-        } else {
-            if (pat_len < 255) pat[pat_len++] = *p++;
-        }
+        } else { if (pat_len < 255) pat[pat_len++] = *p++; }
     }
     if (*p == delim) p++;
-
     char rep[256]; int rep_len = 0;
     while (*p && *p != delim) {
         if (*p == '\\' && *(p + 1)) {
             if (rep_len < 254) { rep[rep_len++] = *p++; rep[rep_len++] = *p++; }
-        } else {
-            if (rep_len < 255) rep[rep_len++] = *p++;
-        }
+        } else { if (rep_len < 255) rep[rep_len++] = *p++; }
     }
     if (*p == delim) p++;
-
     int global = 0;
     while (*p) { if (*p == 'g') global = 1; p++; }
-
     do_substitute(line1, line2, pat, pat_len, rep, rep_len, global);
 }
 
@@ -331,9 +319,7 @@ static void cmd_global(int line1, int line2, const char *args, int invert)
         if (*p == '\\' && *(p + 1) == delim) {
             if (plen < 255) pat[plen++] = delim;
             p += 2;
-        } else {
-            if (plen < 255) pat[plen++] = *p++;
-        }
+        } else { if (plen < 255) pat[plen++] = *p++; }
     }
     pat[plen] = '\0';
     if (*p == delim) p++;
@@ -365,7 +351,6 @@ static void cmd_move(int line1, int line2, int dest)
         return;
     }
     save_undo();
-
     char **saved = malloc(sizeof(char *) * n);
     int   *slens = malloc(sizeof(int) * n);
     for (int i = 0; i < n; i++) {
@@ -373,9 +358,7 @@ static void cmd_move(int line1, int line2, int dest)
         saved[i] = malloc(slens[i] + 1);
         memcpy(saved[i], E.lines[line1 + i].data, slens[i]);
     }
-
     cmd_delete(line1, line2);
-
     int ins = (dest > line2) ? dest - n : dest;
     for (int i = 0; i < n; i++) {
         insert_line_at(ins + 1 + i);
@@ -388,11 +371,8 @@ static void cmd_move(int line1, int line2, int dest)
         l->len = slens[i];
         free(saved[i]);
     }
-    free(saved);
-    free(slens);
-    E.cy    = ins + n;
-    E.dirty = 1;
-    clamp_cursor();
+    free(saved); free(slens);
+    E.cy = ins + n; E.dirty = 1; clamp_cursor();
 }
 
 static void cmd_copy(int line1, int line2, int dest)
@@ -410,9 +390,61 @@ static void cmd_copy(int line1, int line2, int dest)
         memcpy(dst->data, src->data, src->len);
         dst->len = src->len;
     }
-    E.cy    = dest + n;
-    E.dirty = 1;
+    E.cy = dest + n; E.dirty = 1; clamp_cursor();
+}
+
+static void ex_input_lines(int after_line)
+{
+    char linebuf[512];
+    int  ins = after_line;
+
+    save_undo();
+    if (!E.batch_mode)
+        write(STDOUT_FILENO,
+              "\t(enter text; press Ctrl-C to finish)\n", 38);
+
+    while (1) {
+        if (!E.batch_mode)
+            write(STDOUT_FILENO, "\t", 1);
+
+        if (!fgets(linebuf, sizeof(linebuf), stdin)) {
+            E.sig_int = 0;
+            break;
+        }
+
+        int l = (int)strlen(linebuf);
+        if (l > 0 && linebuf[l - 1] == '\n') linebuf[--l] = '\0';
+
+        insert_line_at(ins + 1);
+        ins++;
+        Line *cur = &E.lines[ins];
+        if (l + 1 > cur->cap) {
+            cur->cap  = l + LINE_INIT;
+            cur->data = realloc(cur->data, cur->cap);
+        }
+        if (l > 0) memcpy(cur->data, linebuf, l);
+        cur->len = l;
+        E.dirty  = 1;
+    }
+
+    E.cy = ins > 0 ? ins : 0;
     clamp_cursor();
+}
+
+static void cmd_show_options(void)
+{
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+             "autoindent=%s  syntax=%s  number=%s  ruler=%s  showmode=%s\n"
+             "tabstop=%d  shiftwidth=%d  readonly=%s",
+             E.opt_autoindent ? "on" : "off",
+             E.opt_syntax     ? "on" : "off",
+             E.opt_number     ? "on" : "off",
+             E.opt_ruler      ? "on" : "off",
+             E.opt_showmode   ? "on" : "off",
+             E.tabstop, E.shiftwidth,
+             E.readonly       ? "on" : "off");
+    ex_out(buf);
 }
 
 void dispatch_ex_cmd(const char *raw)
@@ -454,24 +486,16 @@ void dispatch_ex_cmd(const char *raw)
         const char *arg = s + 1;
         while (*arg == ' ') arg++;
         char expanded[512];
-        if (!expand_cmd(arg, expanded, sizeof(expanded))) {
-            flush_status();
-            return;
-        }
+        if (!expand_cmd(arg, expanded, sizeof(expanded))) { flush_status(); return; }
         if (expanded[0] == '\0') {
             if (E.last_bang_cmd[0]) {
                 strncpy(expanded, E.last_bang_cmd, sizeof(expanded) - 1);
-            } else {
-                ex_out("E34: No previous command");
-                return;
-            }
+            } else { ex_out("E34: No previous command"); return; }
         }
         if (has_range) {
-            shell_filter(line1, line2, expanded);
-            flush_status();
+            shell_filter(line1, line2, expanded); flush_status();
         } else {
-            shell_exec(expanded);
-            flush_status();
+            shell_exec(expanded); flush_status();
         }
         return;
     }
@@ -488,8 +512,8 @@ void dispatch_ex_cmd(const char *raw)
         return;
     }
 
-    if (strcmp(s, "vi") == 0    || strcmp(s, "visual") == 0
-        || strncmp(s, "vi ", 3) == 0 || strncmp(s, "visual ", 7) == 0) {
+    if (strcmp(s, "vi")  == 0    || strcmp(s, "visual") == 0
+        || strncmp(s, "vi ",  3) == 0 || strncmp(s, "visual ", 7) == 0) {
         E.ex_mode = 0;
         return;
     }
@@ -500,11 +524,8 @@ void dispatch_ex_cmd(const char *raw)
             if (E.dirty) save_file(E.filename);
             flush_status();
             if (!E.dirty) exit(0);
-        } else if (!E.dirty) {
-            exit(0);
-        } else {
-            ex_out("E32: No file name");
-        }
+        } else if (!E.dirty) { exit(0); }
+        else { ex_out("E32: No file name"); }
         return;
     }
 
@@ -516,12 +537,9 @@ void dispatch_ex_cmd(const char *raw)
             E.filename[sizeof(E.filename) - 1] = '\0';
         }
         if (E.filename[0]) {
-            save_file(E.filename);
-            flush_status();
+            save_file(E.filename); flush_status();
             if (!E.dirty) exit(0);
-        } else {
-            ex_out("E32: No file name");
-        }
+        } else { ex_out("E32: No file name"); }
         return;
     }
 
@@ -551,14 +569,25 @@ void dispatch_ex_cmd(const char *raw)
             return;
         }
         for (int i = 0; i < E.nlines; i++) free(E.lines[i].data);
-        E.nlines = 0; E.cx = 0; E.cy = 0; E.rowoff = 0; E.coloff = 0;
-        E.dirty  = 0;
+        E.nlines = 0; E.cx = 0; E.cy = 0; E.rowoff = 0; E.coloff = 0; E.dirty = 0;
         if (*arg) {
             strncpy(E.filename, arg, sizeof(E.filename) - 1);
             E.filename[sizeof(E.filename) - 1] = '\0';
         }
-        if (E.filename[0]) { load_file(E.filename); flush_status(); }
-        else insert_line_at(0);
+        if (E.filename[0]) {
+            detect_filetype();
+            load_file(E.filename);
+            source_exrc("/etc/vi.exrc");
+            const char *home = getenv("HOME");
+            if (home) {
+                char path[512];
+                snprintf(path, sizeof(path), "%s/.exrc", home);
+                source_exrc(path);
+            }
+            flush_status();
+        } else {
+            insert_line_at(0);
+        }
         return;
     }
 
@@ -570,8 +599,7 @@ void dispatch_ex_cmd(const char *raw)
             if (!expand_cmd(arg, expanded, sizeof(expanded))) {
                 flush_status(); return;
             }
-            shell_read(line2, expanded);
-            flush_status();
+            shell_read(line2, expanded); flush_status();
         }
         return;
     }
@@ -586,41 +614,67 @@ void dispatch_ex_cmd(const char *raw)
                 flush_status(); return;
             }
             FILE *f = fopen(expanded, "r");
-            if (!f) {
-                ex_outf("E484: Can't open file %s", expanded);
-                return;
-            }
+            if (!f) { ex_outf("E484: Can't open file %s", expanded); return; }
             save_undo();
             char buf[4096];
-            int  ins = line2;
-            int  nlines = 0;
+            int  ins = line2, nlines = 0;
             while (fgets(buf, sizeof(buf), f)) {
                 int l = (int)strlen(buf);
                 if (l > 0 && buf[l - 1] == '\n') buf[--l] = '\0';
-                insert_line_at(ins + 1);
-                ins++;
+                insert_line_at(ins + 1); ins++;
                 Line *cur = &E.lines[ins];
                 if (l + 1 > cur->cap) {
                     cur->cap  = l + LINE_INIT;
                     cur->data = realloc(cur->data, cur->cap);
                 }
-                memcpy(cur->data, buf, l);
-                cur->len = l;
-                nlines++;
+                memcpy(cur->data, buf, l); cur->len = l; nlines++;
             }
             fclose(f);
-            E.cy    = ins;
-            E.dirty = 1;
-            clamp_cursor();
+            E.cy = ins; E.dirty = 1; clamp_cursor();
             ex_outf("%s: %d line%s", expanded, nlines, nlines != 1 ? "s" : "");
+        }
+        return;
+    }
+
+    if ((s[0] == 'a' && (s[1] == '\0' || s[1] == '!'))
+        || strncmp(s, "append", 6) == 0) {
+        if (E.ex_mode)
+            ex_input_lines(line2);
+        return;
+    }
+
+    if ((s[0] == 'i' && (s[1] == '\0' || s[1] == '!'))
+        || strncmp(s, "insert", 6) == 0) {
+        if (E.ex_mode)
+            ex_input_lines(line1 > 0 ? line1 - 1 : 0);
+        else {
+            save_undo();
+            insert_line_at(line1 > 0 ? line1 - 1 : 0);
+            E.cy  = line1 > 0 ? line1 - 1 : 0;
+            E.cx  = 0;
+            E.mode = MODE_INSERT;
+            E.ins_current_len = 0;
+        }
+        return;
+    }
+
+    if ((s[0] == 'c' && (s[1] == '\0' || s[1] == '!'))
+        || strncmp(s, "change", 6) == 0) {
+        cmd_delete(line1, line2);
+        if (E.ex_mode) {
+            ex_input_lines(line1 > 0 ? line1 - 1 : 0);
+        } else {
+            E.cy  = line1 > 0 ? line1 - 1 : 0;
+            E.cx  = 0;
+            E.mode = MODE_INSERT;
+            E.ins_current_len = 0;
         }
         return;
     }
 
     if ((s[0] == 'd' && (s[1] == '\0' || s[1] == ' '))
         || strncmp(s, "delete", 6) == 0) {
-        cmd_delete(line1, line2);
-        return;
+        cmd_delete(line1, line2); return;
     }
 
     if ((strncmp(s, "co", 2) == 0 && (s[2] == 'p' || s[2] == ' ' || s[2] == '\0'))
@@ -646,26 +700,44 @@ void dispatch_ex_cmd(const char *raw)
         return;
     }
 
+    if (s[0] == 'l' || strncmp(s, "list", 4) == 0) {
+        list_lines(line1, line2); return;
+    }
+
     if (s[0] == 'p' || strncmp(s, "print", 5) == 0) {
-        print_lines(line1, line2, 0);
-        return;
+        print_lines(line1, line2, 0); return;
     }
 
     if (strncmp(s, "nu", 2) == 0 || strncmp(s, "number", 6) == 0 || s[0] == '#') {
-        print_lines(line1, line2, 1);
-        return;
+        print_lines(line1, line2, 1); return;
     }
 
     if (s[0] == '=') {
-        ex_outf("%d", line2 + 1);
+        ex_outf("%d", line2 + 1); return;
+    }
+
+    if ((s[0] == 'f' && (s[1] == '\0' || s[1] == ' '))
+        || strncmp(s, "file", 4) == 0) {
+        const char *arg = (strncmp(s, "file", 4) == 0) ? s + 4 : s + 1;
+        while (*arg == ' ') arg++;
+        if (*arg) {
+            strncpy(E.filename, arg, sizeof(E.filename) - 1);
+            E.filename[sizeof(E.filename) - 1] = '\0';
+            detect_filetype();
+        }
+        const char *fn = E.filename[0] ? E.filename : "[No Name]";
+        ex_outf("\"%s\"%s%s  line %d of %d  --%d%%--",
+                fn,
+                E.readonly ? " [readonly]" : "",
+                E.dirty    ? " [modified]" : "",
+                E.cy + 1, E.nlines,
+                E.nlines > 0 ? (int)((long)(E.cy + 1) * 100 / E.nlines) : 0);
         return;
     }
 
     if ((s[0] == 'u' && (s[1] == '\0' || s[1] == ' '))
         || strncmp(s, "undo", 4) == 0) {
-        do_undo();
-        flush_status();
-        return;
+        do_undo(); flush_status(); return;
     }
 
     if ((s[0] == 'y' && (s[1] == '\0' || s[1] == 'a' || s[1] == ' '))
@@ -691,18 +763,14 @@ void dispatch_ex_cmd(const char *raw)
         if (E.yank_data) {
             save_undo();
             int ins = line2;
-            insert_line_at(ins + 1);
-            ins++;
+            insert_line_at(ins + 1); ins++;
             Line *l = &E.lines[ins];
             if (E.yank_len + 1 > l->cap) {
                 l->cap  = E.yank_len + LINE_INIT;
                 l->data = realloc(l->data, l->cap);
             }
             memcpy(l->data, E.yank_data, E.yank_len);
-            l->len  = E.yank_len;
-            E.cy    = ins;
-            E.dirty = 1;
-            clamp_cursor();
+            l->len = E.yank_len; E.cy = ins; E.dirty = 1; clamp_cursor();
         }
         return;
     }
@@ -712,13 +780,10 @@ void dispatch_ex_cmd(const char *raw)
         int n = line2 - line1;
         for (int k = 0; k < n && line1 + 1 < E.nlines; k++) {
             Line *u = &E.lines[line1];
-            if (u->len > 0)
-                line_insert_char(u, u->len, ' ');
+            if (u->len > 0) line_insert_char(u, u->len, ' ');
             merge_lines(line1, line1 + 1);
         }
-        E.cy    = line1;
-        E.dirty = 1;
-        clamp_cursor();
+        E.cy = line1; E.dirty = 1; clamp_cursor();
         return;
     }
 
@@ -753,11 +818,66 @@ void dispatch_ex_cmd(const char *raw)
     }
 
     if (strncmp(s, "set", 3) == 0 && (s[3] == '\0' || s[3] == ' ')) {
-        run_ex_line(s);
+        const char *arg = s + 3;
+        while (*arg == ' ') arg++;
+        if (!*arg || strcmp(arg, "all") == 0) {
+            cmd_show_options();
+        } else {
+            run_ex_line(s);
+        }
         return;
     }
 
-    if (strncmp(s, "version", 7) == 0) {
+    if (strncmp(s, "syntax", 6) == 0 && (s[6] == ' ' || s[6] == '\0')) {
+        const char *arg = s + 6;
+        while (*arg == ' ') arg++;
+        if (strcmp(arg, "on") == 0)      E.opt_syntax = 1;
+        else if (strcmp(arg, "off") == 0) E.opt_syntax = 0;
+        return;
+    }
+
+    if ((strncmp(s, "so", 2) == 0 && (s[2] == ' ' || s[2] == '\0'))
+        || strncmp(s, "source", 6) == 0) {
+        const char *arg = (strncmp(s, "source", 6) == 0) ? s + 6 : s + 2;
+        while (*arg == ' ') arg++;
+        if (*arg) source_exrc(arg);
+        return;
+    }
+
+    if (strncmp(s, "noremap!", 8) == 0) {
+        run_ex_line(s); return;
+    }
+    if (strncmp(s, "noremap", 7) == 0 && (s[7] == ' ' || s[7] == '\0')) {
+        run_ex_line(s); return;
+    }
+    if (strncmp(s, "map!", 4) == 0) {
+        run_ex_line(s); return;
+    }
+    if (strncmp(s, "map", 3) == 0 && (s[3] == ' ' || s[3] == '\0')) {
+        run_ex_line(s); return;
+    }
+    if (strncmp(s, "unmap!", 6) == 0) {
+        run_ex_line(s); return;
+    }
+    if (strncmp(s, "unmap", 5) == 0 && (s[5] == ' ' || s[5] == '\0')) {
+        run_ex_line(s); return;
+    }
+
+    if (strncmp(s, "color", 5) == 0 && (s[5] == ' ' || s[5] == '\0')) {
+        run_ex_line(s); return;
+    }
+    if (strncmp(s, "colour", 6) == 0 && (s[6] == ' ' || s[6] == '\0')) {
+        run_ex_line(s); return;
+    }
+    if (strncmp(s, "syntax", 6) == 0 && (s[6] == ' ' || s[6] == '\0')) {
+        const char *arg = s + 6;
+        while (*arg == ' ') arg++;
+        if (strcmp(arg, "on") == 0)       E.opt_syntax = 1;
+        else if (strcmp(arg, "off") == 0)  E.opt_syntax = 0;
+        return;
+    }
+
+    if (strncmp(s, "version", 7) == 0 || strcmp(s, "ve") == 0) {
         ex_out("vi clone 1.0 (C99/POSIX.1-2008)");
         return;
     }
@@ -769,20 +889,18 @@ void run_ex_mode(void)
 {
     char linebuf[512];
 
-    if (!E.batch_mode) {
-        const char *intro =
-            "Ex mode.  Type 'visual' to go to visual mode.\n";
-        write(STDOUT_FILENO, intro, strlen(intro));
-    }
+    if (!E.batch_mode)
+        write(STDOUT_FILENO,
+              "Ex mode.  Type 'visual' to go to visual mode.\n", 47);
 
     while (E.ex_mode) {
         if (!E.batch_mode)
             write(STDOUT_FILENO, ":", 1);
 
         if (!fgets(linebuf, sizeof(linebuf), stdin)) {
+            E.sig_int = 0;
             if (E.dirty && !E.batch_mode)
-                write(STDERR_FILENO,
-                      "No write since last change\n", 27);
+                write(STDERR_FILENO, "No write since last change\n", 27);
             exit(0);
         }
 
@@ -793,8 +911,7 @@ void run_ex_mode(void)
             if (!E.batch_mode) {
                 if (E.cy + 1 < E.nlines) E.cy++;
                 if (E.lines[E.cy].len > 0)
-                    write(STDOUT_FILENO, E.lines[E.cy].data,
-                          E.lines[E.cy].len);
+                    write(STDOUT_FILENO, E.lines[E.cy].data, E.lines[E.cy].len);
                 write(STDOUT_FILENO, "\n", 1);
             }
             continue;

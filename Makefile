@@ -1,7 +1,7 @@
 CC      = cc
 CFLAGS  = -std=c99 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -O2
 TARGET  = vi
-SRCS    = main.c terminal.c buffer.c screen.c modes.c signals.c env.c ex.c shell.c
+SRCS    = main.c terminal.c buffer.c screen.c modes.c signals.c env.c ex.c shell.c highlight.c keymap.c
 OBJS    = $(SRCS:.c=.o)
 
 $(TARGET): $(OBJS)

@@ -8,11 +8,16 @@ static void die(const char *msg)
     exit(1);
 }
 
-void disable_raw_mode(void)
+static void disable_raw_atexit(void)
 {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios);
     write(STDOUT_FILENO, "\x1b[2J", 4);
     write(STDOUT_FILENO, "\x1b[H",  3);
+}
+
+void disable_raw_mode(void)
+{
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios);
 }
 
 void reenable_raw_mode(void)
@@ -30,7 +35,7 @@ void reenable_raw_mode(void)
 void enable_raw(void)
 {
     if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1) die("tcgetattr");
-    atexit(disable_raw_mode);
+    atexit(disable_raw_atexit);
     reenable_raw_mode();
 }
 

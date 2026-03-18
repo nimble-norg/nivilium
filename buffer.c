@@ -1,5 +1,27 @@
 #include "vi.h"
 
+int file_is_dir(const char *path)
+{
+    struct stat st;
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) return 1;
+    return 0;
+}
+
+int file_is_readable(const char *path)
+{
+    return access(path, R_OK) == 0;
+}
+
+int file_is_writable(const char *path)
+{
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        if (access(path, W_OK) != 0) return 0;
+        return 1;
+    }
+    return 1;
+}
+
 void line_insert_char(Line *l, int pos, char c)
 {
     if (l->len + 2 > l->cap) {
@@ -31,8 +53,8 @@ void insert_line_at(int at)
 
 void merge_lines(int upper, int lower)
 {
-    Line *u = &E.lines[upper];
-    Line *l = &E.lines[lower];
+    Line *u    = &E.lines[upper];
+    Line *l    = &E.lines[lower];
     int   need = u->len + l->len + 1;
 
     if (need > u->cap) {
@@ -91,11 +113,38 @@ void do_undo(void)
 
 void load_file(const char *fname)
 {
+    if (file_is_dir(fname)) {
+        insert_line_at(0);
+        snprintf(E.statusmsg, sizeof(E.statusmsg),
+                 "E17: \"%s\" is a directory", fname);
+        return;
+    }
+
+    struct stat st;
+    if (stat(fname, &st) == 0) {
+        if (access(fname, R_OK) != 0) {
+            insert_line_at(0);
+            snprintf(E.statusmsg, sizeof(E.statusmsg),
+                     "E484: Can't open file \"%s\": permission denied", fname);
+            E.readonly = 1;
+            return;
+        }
+        if (access(fname, W_OK) != 0) {
+            E.readonly = 1;
+        }
+    }
+
     FILE *f = fopen(fname, "r");
     if (!f) {
         insert_line_at(0);
-        snprintf(E.statusmsg, sizeof(E.statusmsg),
-                 "\"%s\" [New File]", fname);
+        if (errno == ENOENT) {
+            snprintf(E.statusmsg, sizeof(E.statusmsg),
+                     "\"%s\" [New File]", fname);
+        } else {
+            snprintf(E.statusmsg, sizeof(E.statusmsg),
+                     "E484: Can't open file \"%s\": %s", fname, strerror(errno));
+            E.readonly = 1;
+        }
         return;
     }
 
@@ -118,8 +167,9 @@ void load_file(const char *fname)
 
     if (E.nlines == 0) insert_line_at(0);
 
+    const char *ro = E.readonly ? " [readonly]" : "";
     snprintf(E.statusmsg, sizeof(E.statusmsg),
-             "\"%s\" %dL", fname, E.nlines);
+             "\"%s\"%s %dL", fname, ro, E.nlines);
 }
 
 void save_file(const char *fname)
@@ -129,10 +179,25 @@ void save_file(const char *fname)
                  "E45: 'readonly' option is set (use ! to override)");
         return;
     }
+
+    if (file_is_dir(fname)) {
+        snprintf(E.statusmsg, sizeof(E.statusmsg),
+                 "E17: \"%s\" is a directory — use :w <filename> to save", fname);
+        return;
+    }
+
+    struct stat st;
+    if (stat(fname, &st) == 0 && access(fname, W_OK) != 0) {
+        snprintf(E.statusmsg, sizeof(E.statusmsg),
+                 "E505: \"%s\" is read-only (use ! to override)", fname);
+        return;
+    }
+
     FILE *f = fopen(fname, "w");
     if (!f) {
         snprintf(E.statusmsg, sizeof(E.statusmsg),
-                 "E212: Cannot open \"%s\" for writing", fname);
+                 "E212: Can't open \"%s\" for writing: %s",
+                 fname, strerror(errno));
         return;
     }
     for (int i = 0; i < E.nlines; i++) {

@@ -11,10 +11,12 @@
 #include <errno.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <sys/stat.h>
 
 #define MAX_LINES      65536
 #define LINE_INIT      128
 #define NUM_NAMED_BUFS 26
+#define MAX_MAPS       128
 
 #define KEY_UP    1000
 #define KEY_DOWN  1001
@@ -59,6 +61,18 @@ typedef struct {
     char *b;
     int   len;
 } Abuf;
+
+typedef struct {
+    char lhs[32];
+    char rhs[256];
+    int  noremap;
+    int  for_insert;
+} KeyMap;
+
+typedef struct {
+    char name[16];
+    char value[32];
+} ColorEntry;
 
 typedef struct {
     Line           lines[MAX_LINES];
@@ -133,6 +147,26 @@ typedef struct {
     int            last_sub_global;
 
     char           last_bang_cmd[256];
+
+    int            opt_autoindent;
+    int            opt_syntax;
+    int            opt_number;
+    int            opt_ruler;
+    int            opt_showmode;
+    int            opt_colors;
+    char           opt_statusfmt[256];
+    char           opt_indentchar;
+    int            opt_expandtab;
+    char           filetype[32];
+
+    KeyMap         maps[MAX_MAPS];
+    int            nmap;
+
+    ColorEntry     colors[64];
+    int            ncolors;
+
+    char           map_pending[64];
+    int            map_pending_len;
 } Editor;
 
 extern Editor E;
@@ -168,6 +202,8 @@ void check_signals(void);
 
 void read_env(void);
 void run_ex_line(const char *s);
+void source_exrc(const char *path);
+void detect_filetype(void);
 
 void dispatch_ex_cmd(const char *cmd);
 void run_ex_mode(void);
@@ -176,5 +212,19 @@ int  expand_cmd(const char *src, char *dst, int dstsz);
 void shell_exec(const char *cmd);
 void shell_read(int after_line, const char *cmd);
 void shell_filter(int line1, int line2, const char *cmd);
+
+void highlight_line(Abuf *ab, const char *data, int len, int row);
+
+int  map_add(const char *lhs, const char *rhs, int noremap, int for_insert);
+void map_remove(const char *lhs, int for_insert);
+const char *map_lookup(const char *lhs, int for_insert);
+void map_show(int for_insert);
+
+const char *color_get(const char *name);
+void        color_set(const char *name, const char *value);
+
+int  file_is_dir(const char *path);
+int  file_is_readable(const char *path);
+int  file_is_writable(const char *path);
 
 #endif

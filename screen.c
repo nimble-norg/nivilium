@@ -14,45 +14,143 @@ void ab_free(Abuf *ab)
     ab->len = 0;
 }
 
+static void ab_color(Abuf *ab, const char *name)
+{
+    if (!E.opt_colors) return;
+    const char *v = color_get(name);
+    if (v) ab_append(ab, v, (int)strlen(v));
+}
+
+static void ab_reset(Abuf *ab)
+{
+    if (!E.opt_colors) return;
+    const char *v = color_get("normal");
+    if (v) ab_append(ab, v, (int)strlen(v));
+    else   ab_append(ab, "\x1b[0m", 4);
+}
+
+static const char *mode_name(void)
+{
+    switch (E.mode) {
+        case MODE_INSERT:  return "-- INSERT --";
+        case MODE_REPLACE: return "-- REPLACE --";
+        case MODE_SEARCH:  return "-- SEARCH --";
+        case MODE_BANG:    return "-- FILTER --";
+        default:           return "";
+    }
+}
+
+static void pct_str(char *buf, int sz)
+{
+    if (E.nlines <= 1)
+        snprintf(buf, sz, "All");
+    else if (E.rowoff == 0)
+        snprintf(buf, sz, "Top");
+    else if (E.rowoff + E.rows >= E.nlines)
+        snprintf(buf, sz, "Bot");
+    else {
+        int p = (int)((long)(E.cy + 1) * 100 / E.nlines);
+        snprintf(buf, sz, "%d%%", p);
+    }
+}
+
+static void format_status(char *out, int outsz, const char *fmt)
+{
+    int  oi = 0;
+    char pct[16];
+    pct_str(pct, sizeof(pct));
+
+    for (int i = 0; fmt[i] && oi < outsz - 1; i++) {
+        if (fmt[i] != '%') { out[oi++] = fmt[i]; continue; }
+        i++;
+        switch (fmt[i]) {
+        case 'f': {
+            const char *fn = E.filename[0] ? E.filename : "[No Name]";
+            int l = (int)strlen(fn);
+            if (oi + l >= outsz) l = outsz - oi - 1;
+            memcpy(out + oi, fn, l); oi += l; break;
+        }
+        case 'm': {
+            const char *mn = E.opt_showmode ? mode_name() : "";
+            int l = (int)strlen(mn);
+            if (oi + l >= outsz) l = outsz - oi - 1;
+            memcpy(out + oi, mn, l); oi += l; break;
+        }
+        case 'M': if (oi < outsz - 1) out[oi++] = E.dirty ? '+' : ' '; break;
+        case 'R': {
+            const char *ro = E.readonly ? "[RO]" : "";
+            int l = (int)strlen(ro);
+            if (oi + l >= outsz) l = outsz - oi - 1;
+            memcpy(out + oi, ro, l); oi += l; break;
+        }
+        case 'l': {
+            char tmp[16]; int l = snprintf(tmp, sizeof(tmp), "%d", E.cy + 1);
+            if (oi + l >= outsz) l = outsz - oi - 1;
+            memcpy(out + oi, tmp, l); oi += l; break;
+        }
+        case 'L': {
+            char tmp[16]; int l = snprintf(tmp, sizeof(tmp), "%d", E.nlines);
+            if (oi + l >= outsz) l = outsz - oi - 1;
+            memcpy(out + oi, tmp, l); oi += l; break;
+        }
+        case 'c': {
+            char tmp[16]; int l = snprintf(tmp, sizeof(tmp), "%d", E.cx + 1);
+            if (oi + l >= outsz) l = outsz - oi - 1;
+            memcpy(out + oi, tmp, l); oi += l; break;
+        }
+        case 'p': {
+            int l = (int)strlen(pct);
+            if (oi + l >= outsz) l = outsz - oi - 1;
+            memcpy(out + oi, pct, l); oi += l; break;
+        }
+        case 't': {
+            int l = (int)strlen(E.filetype);
+            if (oi + l >= outsz) l = outsz - oi - 1;
+            memcpy(out + oi, E.filetype, l); oi += l; break;
+        }
+        case '%': if (oi < outsz - 1) out[oi++] = '%'; break;
+        default:
+            if (oi < outsz - 2) { out[oi++] = '%'; out[oi++] = fmt[i]; } break;
+        }
+    }
+    out[oi] = '\0';
+}
+
 static void build_status_bar(Abuf *ab)
 {
-    char left[128], right[128];
+    char left[256], right[128];
     int  llen, rlen;
 
-    const char *mname = "";
-    if (E.mode == MODE_INSERT)  mname = "-- INSERT --";
-    if (E.mode == MODE_REPLACE) mname = "-- REPLACE --";
-    if (E.mode == MODE_SEARCH)  mname = "-- SEARCH --";
-
-    const char *fname  = E.filename[0] ? E.filename : "[No Name]";
-    const char *ronly  = E.readonly ? " [RO]" : "";
-    char dirty_flag    = E.dirty ? '+' : ' ';
-
-    llen = snprintf(left, sizeof(left), " %-13s %.36s%s %c",
-                    mname, fname, ronly, dirty_flag);
-    if (llen < 0) llen = 0;
-
-    char pct[16];
-    if (E.nlines <= 1) {
-        snprintf(pct, sizeof(pct), "All");
-    } else if (E.rowoff == 0) {
-        snprintf(pct, sizeof(pct), "Top");
-    } else if (E.rowoff + E.rows >= E.nlines) {
-        snprintf(pct, sizeof(pct), "Bot");
+    if (E.opt_colors) {
+        const char *sb = color_get("statusbar");
+        if (sb) ab_append(ab, sb, (int)strlen(sb));
+        else    ab_append(ab, "\x1b[7m", 4);
     } else {
-        int p = (int)((long)(E.cy + 1) * 100 / E.nlines);
-        snprintf(pct, sizeof(pct), "%d%%", p);
+        ab_append(ab, "\x1b[7m", 4);
     }
 
-    rlen = snprintf(right, sizeof(right), "%s  %d,%d",
-                    pct, E.cy + 1, E.cx + 1);
-    if (rlen < 0) rlen = 0;
+    if (E.opt_statusfmt[0]) {
+        format_status(left, sizeof(left), E.opt_statusfmt);
+        llen = (int)strlen(left); rlen = 0; right[0] = '\0';
+    } else {
+        const char *mn    = E.opt_showmode ? mode_name() : "";
+        const char *fname = E.filename[0]  ? E.filename  : "[No Name]";
+        const char *ronly = E.readonly      ? " [RO]"     : "";
+        char pct[16];
+        pct_str(pct, sizeof(pct));
+        llen = snprintf(left, sizeof(left), " %-13s %.36s%s %c",
+                        mn, fname, ronly, E.dirty ? '+' : ' ');
+        if (llen < 0) llen = 0;
+        if (E.opt_ruler) {
+            rlen = snprintf(right, sizeof(right), "%s  %d,%d",
+                            pct, E.cy + 1, E.cx + 1);
+        } else {
+            rlen = 0; right[0] = '\0';
+        }
+        if (rlen < 0) rlen = 0;
+    }
 
-    int total = llen + rlen;
-    int pad   = E.cols - total;
-
-    ab_append(ab, "\x1b[7m", 4);
-
+    int pad = E.cols - llen - rlen;
     if (llen > E.cols) llen = E.cols;
     ab_append(ab, left, llen);
 
@@ -62,21 +160,14 @@ static void build_status_bar(Abuf *ab)
         char spaces[256];
         if (sp > 255) sp = 255;
         memset(spaces, ' ', sp);
-        ab_append(ab, spaces, sp);
-        written += sp;
+        ab_append(ab, spaces, sp); written += sp;
     }
-
     if (rlen > 0 && written < E.cols) {
         int avail = E.cols - written;
         int r     = rlen < avail ? rlen : avail;
-        ab_append(ab, right + (rlen - r), r);
-        written += r;
+        ab_append(ab, right + (rlen - r), r); written += r;
     }
-
-    while (written < E.cols) {
-        ab_append(ab, " ", 1);
-        written++;
-    }
+    while (written < E.cols) { ab_append(ab, " ", 1); written++; }
 
     ab_append(ab, "\x1b[m", 3);
 }
@@ -112,10 +203,23 @@ static void build_command_line(Abuf *ab)
 
 void draw_screen(void)
 {
-    if (E.cy < E.rowoff)               E.rowoff = E.cy;
-    if (E.cy >= E.rowoff + E.rows)     E.rowoff = E.cy - E.rows + 1;
-    if (E.cx < E.coloff)               E.coloff = E.cx;
-    if (E.cx >= E.coloff + E.cols)     E.coloff = E.cx - E.cols + 1;
+    int numw = 0;
+    if (E.opt_number) {
+        char tmp[16];
+        numw = snprintf(tmp, sizeof(tmp), "%d", E.nlines);
+        if (numw < 1) numw = 1;
+        numw += 1;
+    }
+
+    int text_cols = E.cols - numw;
+    if (text_cols < 1) text_cols = 1;
+
+    if (E.cy < E.rowoff)                    E.rowoff = E.cy;
+    if (E.cy >= E.rowoff + E.rows)          E.rowoff = E.cy - E.rows + 1;
+    if (E.cx < E.coloff)                    E.coloff = E.cx;
+    if (E.cx >= E.coloff + text_cols)       E.coloff = E.cx - text_cols + 1;
+    if (E.rowoff < 0)                       E.rowoff = 0;
+    if (E.coloff < 0)                       E.coloff = 0;
 
     Abuf ab = {NULL, 0};
     char buf[64];
@@ -128,17 +232,43 @@ void draw_screen(void)
         int filerow = y + E.rowoff;
 
         if (filerow >= E.nlines) {
-            ab_append(&ab, "~\x1b[K\r\n", 7);
+            if (E.opt_number) {
+                char pad[32];
+                int  pl = snprintf(pad, sizeof(pad), "%-*s", numw, "~");
+                ab_color(&ab, "tilde");
+                ab_append(&ab, pad, pl);
+                ab_reset(&ab);
+            } else {
+                ab_color(&ab, "tilde");
+                ab_append(&ab, "~", 1);
+                ab_reset(&ab);
+            }
+            ab_append(&ab, "\x1b[K\r\n", 5);
             continue;
+        }
+
+        if (E.opt_number) {
+            char numstr[32];
+            int  nl = snprintf(numstr, sizeof(numstr), "%*d ",
+                                numw - 1, filerow + 1);
+            if (filerow == E.cy)
+                ab_color(&ab, "linenr_cur");
+            else
+                ab_color(&ab, "linenr");
+            ab_append(&ab, numstr, nl);
+            ab_reset(&ab);
         }
 
         Line *l   = &E.lines[filerow];
         int   col = E.coloff < l->len ? E.coloff : l->len;
         int   len = l->len - col;
         if (len < 0) len = 0;
-        if (len > E.cols) len = E.cols;
+        if (len > text_cols) len = text_cols;
 
-        if (len > 0) ab_append(&ab, l->data + col, len);
+        if (len > 0)
+            highlight_line(&ab, l->data + col, len, filerow);
+        if (E.opt_syntax || E.opt_colors)
+            ab_append(&ab, "\x1b[0m", 4);
         ab_append(&ab, "\x1b[K\r\n", 5);
     }
 
@@ -146,6 +276,7 @@ void draw_screen(void)
     ab_append(&ab, "\r\n", 2);
     build_command_line(&ab);
 
+    int scr_col_offset = numw;
     if (E.mode == MODE_EX) {
         int col = E.ex_len + 2;
         if (col > E.cols) col = E.cols;
@@ -160,7 +291,7 @@ void draw_screen(void)
         n = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.rows + 2, col);
     } else {
         int scr_row = E.cy - E.rowoff + 1;
-        int scr_col = E.cx - E.coloff + 1;
+        int scr_col = E.cx - E.coloff + 1 + scr_col_offset;
         n = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", scr_row, scr_col);
     }
     ab_append(&ab, buf, n);
