@@ -13,6 +13,8 @@ static void disable_raw_atexit(void)
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios);
     write(STDOUT_FILENO, "\x1b[2J", 4);
     write(STDOUT_FILENO, "\x1b[H",  3);
+    if (E.clean_exit)
+        remove_swap();
 }
 
 void disable_raw_mode(void)

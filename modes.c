@@ -325,9 +325,9 @@ static void handle_wait_state(int c)
         if (c == 'Z') {
             if (E.filename[0]) {
                 if (E.dirty) save_file(E.filename);
-                if (!E.dirty) exit(0);
+                if (!E.dirty) clean_exit_editor();
             } else {
-                if (!E.dirty) exit(0);
+                if (!E.dirty) clean_exit_editor();
                 snprintf(E.statusmsg, sizeof(E.statusmsg), "E32: No file name");
             }
         } else {
@@ -722,12 +722,12 @@ static void ins_record(int c)
 
 static int col_of_cx(void)
 {
+    int   t   = E.tabstop > 0 ? E.tabstop : 8;
     int   col = 0;
-    int   ts  = E.tabstop > 0 ? E.tabstop : 8;
     Line *l   = &E.lines[E.cy];
     for (int i = 0; i < E.cx && i < l->len; i++) {
         if (l->data[i] == '\t')
-            col = (col / ts + 1) * ts;
+            col = (col / t + 1) * t;
         else
             col++;
     }
@@ -736,17 +736,14 @@ static int col_of_cx(void)
 
 static void ins_ctrl_d(void)
 {
-    int   sw  = E.shiftwidth > 0 ? E.shiftwidth : 4;
+    int   t   = E.tabstop > 0 ? E.tabstop : 8;
+    int   sw  = E.shiftwidth > 0 ? E.shiftwidth : t;
     Line *l   = &E.lines[E.cy];
-
-    int col = col_of_cx();
+    int   col = col_of_cx();
     if (col == 0) return;
-
     int tgt = ((col - 1) / sw) * sw;
-
-    while (E.cx > 0) {
-        int c2 = col_of_cx();
-        if (c2 <= tgt) break;
+    if (tgt < 0) tgt = 0;
+    while (E.cx > 0 && col_of_cx() > tgt) {
         E.cx--;
         line_delete_char(l, E.cx);
     }

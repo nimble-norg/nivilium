@@ -154,6 +154,8 @@ typedef struct {
     int            opt_ruler;
     int            opt_showmode;
     int            opt_colors;
+    int            statusmsg_err;
+    int            clean_exit;
     char           opt_statusfmt[256];
     char           opt_indentchar;
     int            opt_expandtab;
@@ -170,6 +172,9 @@ typedef struct {
 } Editor;
 
 extern Editor E;
+
+#define set_infomsg(...)  do { snprintf(E.statusmsg, sizeof(E.statusmsg), __VA_ARGS__); E.statusmsg_err = 0; } while(0)
+#define set_errmsg(...)   do { snprintf(E.statusmsg, sizeof(E.statusmsg), __VA_ARGS__); E.statusmsg_err = 1; } while(0)
 
 void enable_raw(void);
 void disable_raw_mode(void);
@@ -189,6 +194,7 @@ void do_undo(void);
 void ab_append(Abuf *ab, const char *s, int len);
 void ab_free(Abuf *ab);
 void draw_screen(void);
+int  vis_col_of(int row, int byte_pos);
 
 void clamp_cursor(void);
 void process_normal(int c);
@@ -223,6 +229,9 @@ void map_show(int for_insert);
 const char *color_get(const char *name);
 void        color_set(const char *name, const char *value);
 
+void swap_path(const char *fname, char *out, int outsz);
+void remove_swap(void);
+void clean_exit_editor(void);
 int  file_is_dir(const char *path);
 int  file_is_readable(const char *path);
 int  file_is_writable(const char *path);

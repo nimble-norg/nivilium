@@ -12,7 +12,8 @@ static const char *basename_of(const char *path)
 static void print_version(void)
 {
     const char *msg =
-        "@(#)NIMBLE-ORG NIVILIUM " __DATE__ ", " __TIME__ "\n";
+        "vi clone 1.0 (C99/POSIX.1-2008)\n"
+        "Built: " __DATE__ " " __TIME__ "\n";
     write(STDOUT_FILENO, msg, strlen(msg));
     exit(0);
 }
@@ -131,7 +132,7 @@ int main(int argc, char *argv[])
             load_file(E.filename);
             if (recover) {
                 char swp[512];
-                snprintf(swp, sizeof(swp), "%s.swp", E.filename);
+                swap_path(E.filename, swp, sizeof(swp));
                 if (access(swp, R_OK) == 0) {
                     for (int k = 0; k < E.nlines; k++) free(E.lines[k].data);
                     E.nlines = 0; E.cx = 0; E.cy = 0;
@@ -169,7 +170,7 @@ int main(int argc, char *argv[])
 
     if (E.ex_mode) {
         run_ex_mode();
-        if (E.ex_mode) exit(0);
+        if (E.ex_mode) clean_exit_editor();
         enable_raw();
         get_window_size();
     }

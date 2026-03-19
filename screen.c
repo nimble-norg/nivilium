@@ -29,6 +29,58 @@ static void ab_reset(Abuf *ab)
     else   ab_append(ab, "\x1b[0m", 4);
 }
 
+static int ts(void) { return E.tabstop > 0 ? E.tabstop : 8; }
+
+int vis_col_of(int row, int byte_pos)
+{
+    if (row < 0 || row >= E.nlines) return byte_pos;
+    Line *l  = &E.lines[row];
+    int   t  = ts();
+    int   vc = 0;
+    for (int i = 0; i < byte_pos && i < l->len; i++) {
+        if (l->data[i] == '\t')
+            vc = (vc / t + 1) * t;
+        else
+            vc++;
+    }
+    return vc;
+}
+
+static void render_line(Abuf *ab, int row, int coloff_vis, int text_cols)
+{
+    if (row < 0 || row >= E.nlines) return;
+    Line *l   = &E.lines[row];
+    int   t   = ts();
+    int   vc  = 0;
+    int   out = 0;
+    char  expanded[4096];
+    int   elen = 0;
+
+    for (int i = 0; i < l->len && out < text_cols + coloff_vis; i++) {
+        if (l->data[i] == '\t') {
+            int next = (vc / t + 1) * t;
+            while (vc < next && elen < (int)sizeof(expanded) - 1) {
+                if (vc >= coloff_vis && out < text_cols) {
+                    expanded[elen++] = ' ';
+                    out++;
+                }
+                vc++;
+            }
+        } else {
+            if (vc >= coloff_vis && out < text_cols) {
+                expanded[elen++] = l->data[i];
+                out++;
+            }
+            vc++;
+        }
+    }
+
+    if (elen > 0)
+        highlight_line(ab, expanded, elen, row);
+    if (E.opt_syntax || E.opt_colors)
+        ab_append(ab, "\x1b[0m", 4);
+}
+
 static const char *mode_name(void)
 {
     switch (E.mode) {
@@ -197,7 +249,14 @@ static void build_command_line(Abuf *ab)
     } else if (E.statusmsg[0]) {
         int ml   = (int)strlen(E.statusmsg);
         int show = ml < E.cols ? ml : E.cols;
+        if (E.opt_colors && E.statusmsg_err) {
+            const char *ec = color_get("error");
+            if (ec) ab_append(ab, ec, (int)strlen(ec));
+            else    ab_append(ab, "\x1b[41;1;37m", 10);
+        }
         ab_append(ab, E.statusmsg, show);
+        if (E.opt_colors && E.statusmsg_err)
+            ab_append(ab, "\x1b[0m", 4);
     }
 }
 
@@ -214,10 +273,12 @@ void draw_screen(void)
     int text_cols = E.cols - numw;
     if (text_cols < 1) text_cols = 1;
 
+    int vis_cx = vis_col_of(E.cy, E.cx);
+
     if (E.cy < E.rowoff)                    E.rowoff = E.cy;
     if (E.cy >= E.rowoff + E.rows)          E.rowoff = E.cy - E.rows + 1;
-    if (E.cx < E.coloff)                    E.coloff = E.cx;
-    if (E.cx >= E.coloff + text_cols)       E.coloff = E.cx - text_cols + 1;
+    if (vis_cx < E.coloff)                  E.coloff = vis_cx;
+    if (vis_cx >= E.coloff + text_cols)     E.coloff = vis_cx - text_cols + 1;
     if (E.rowoff < 0)                       E.rowoff = 0;
     if (E.coloff < 0)                       E.coloff = 0;
 
@@ -259,16 +320,7 @@ void draw_screen(void)
             ab_reset(&ab);
         }
 
-        Line *l   = &E.lines[filerow];
-        int   col = E.coloff < l->len ? E.coloff : l->len;
-        int   len = l->len - col;
-        if (len < 0) len = 0;
-        if (len > text_cols) len = text_cols;
-
-        if (len > 0)
-            highlight_line(&ab, l->data + col, len, filerow);
-        if (E.opt_syntax || E.opt_colors)
-            ab_append(&ab, "\x1b[0m", 4);
+        render_line(&ab, filerow, E.coloff, text_cols);
         ab_append(&ab, "\x1b[K\r\n", 5);
     }
 
@@ -276,7 +328,6 @@ void draw_screen(void)
     ab_append(&ab, "\r\n", 2);
     build_command_line(&ab);
 
-    int scr_col_offset = numw;
     if (E.mode == MODE_EX) {
         int col = E.ex_len + 2;
         if (col > E.cols) col = E.cols;
@@ -291,7 +342,8 @@ void draw_screen(void)
         n = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.rows + 2, col);
     } else {
         int scr_row = E.cy - E.rowoff + 1;
-        int scr_col = E.cx - E.coloff + 1 + scr_col_offset;
+        int scr_col = vis_cx - E.coloff + 1 + numw;
+        if (scr_col < 1) scr_col = 1;
         n = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", scr_row, scr_col);
     }
     ab_append(&ab, buf, n);

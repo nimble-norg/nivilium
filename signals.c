@@ -24,6 +24,33 @@ static void install_sigtstp(void)
     sigaction(SIGTSTP, &sa, NULL);
 }
 
+void swap_path(const char *fname, char *out, int outsz)
+{
+    if (!fname || !fname[0]) {
+        snprintf(out, outsz, ".vi.swp");
+        return;
+    }
+    const char *slash = strrchr(fname, '/');
+    if (slash) {
+        int dirlen = (int)(slash - fname + 1);
+        if (dirlen >= outsz - 1) dirlen = outsz - 2;
+        memcpy(out, fname, dirlen);
+        out[dirlen] = '\0';
+        const char *base = slash + 1;
+        snprintf(out + dirlen, outsz - dirlen, ".%s.swp", base);
+    } else {
+        snprintf(out, outsz, ".%s.swp", fname);
+    }
+}
+
+void remove_swap(void)
+{
+    if (!E.filename[0]) return;
+    char path[512];
+    swap_path(E.filename, path, sizeof(path));
+    unlink(path);
+}
+
 void setup_signals(void)
 {
     struct sigaction sa;
@@ -45,7 +72,7 @@ static void backup_file(void)
 {
     if (!E.dirty || !E.filename[0] || E.readonly) return;
     char rec[512];
-    snprintf(rec, sizeof(rec), "%s.swp", E.filename);
+    swap_path(E.filename, rec, sizeof(rec));
     FILE *f = fopen(rec, "w");
     if (!f) return;
     for (int i = 0; i < E.nlines; i++) {
@@ -53,6 +80,12 @@ static void backup_file(void)
         fwrite("\n", 1, 1, f);
     }
     fclose(f);
+}
+
+void clean_exit_editor(void)
+{
+    remove_swap();
+    exit(0);
 }
 
 void check_signals(void)
@@ -93,7 +126,8 @@ void check_signals(void)
         }
         E.mode = MODE_NORMAL;
         clamp_cursor();
-        E.statusmsg[0] = '\0';
+        E.statusmsg[0]     = '\0';
+        E.statusmsg_err    = 0;
     }
     if (E.sig_term) {
         backup_file();
@@ -104,3 +138,4 @@ void check_signals(void)
         exit(1);
     }
 }
+

@@ -93,7 +93,7 @@ void save_undo(void)
 void do_undo(void)
 {
     if (!E.undo_valid) {
-        snprintf(E.statusmsg, sizeof(E.statusmsg), "Already at oldest change");
+        set_errmsg( "Already at oldest change");
         return;
     }
     for (int i = 0; i < E.nlines; i++) free(E.lines[i].data);
@@ -108,14 +108,14 @@ void do_undo(void)
     E.cy         = E.undo_cy;
     E.dirty      = 1;
     E.undo_valid = 0;
-    snprintf(E.statusmsg, sizeof(E.statusmsg), "1 change; before #1");
+    set_infomsg( "1 change; before #1");
 }
 
 void load_file(const char *fname)
 {
     if (file_is_dir(fname)) {
         insert_line_at(0);
-        snprintf(E.statusmsg, sizeof(E.statusmsg),
+        set_errmsg(
                  "E17: \"%s\" is a directory", fname);
         return;
     }
@@ -124,7 +124,7 @@ void load_file(const char *fname)
     if (stat(fname, &st) == 0) {
         if (access(fname, R_OK) != 0) {
             insert_line_at(0);
-            snprintf(E.statusmsg, sizeof(E.statusmsg),
+            set_errmsg(
                      "E484: Can't open file \"%s\": permission denied", fname);
             E.readonly = 1;
             return;
@@ -138,10 +138,10 @@ void load_file(const char *fname)
     if (!f) {
         insert_line_at(0);
         if (errno == ENOENT) {
-            snprintf(E.statusmsg, sizeof(E.statusmsg),
+            set_infomsg(
                      "\"%s\" [New File]", fname);
         } else {
-            snprintf(E.statusmsg, sizeof(E.statusmsg),
+            set_errmsg(
                      "E484: Can't open file \"%s\": %s", fname, strerror(errno));
             E.readonly = 1;
         }
@@ -168,34 +168,34 @@ void load_file(const char *fname)
     if (E.nlines == 0) insert_line_at(0);
 
     const char *ro = E.readonly ? " [readonly]" : "";
-    snprintf(E.statusmsg, sizeof(E.statusmsg),
+    set_infomsg(
              "\"%s\"%s %dL", fname, ro, E.nlines);
 }
 
 void save_file(const char *fname)
 {
     if (E.readonly) {
-        snprintf(E.statusmsg, sizeof(E.statusmsg),
+        set_errmsg(
                  "E45: 'readonly' option is set (use ! to override)");
         return;
     }
 
     if (file_is_dir(fname)) {
-        snprintf(E.statusmsg, sizeof(E.statusmsg),
+        set_errmsg(
                  "E17: \"%s\" is a directory — use :w <filename> to save", fname);
         return;
     }
 
     struct stat st;
     if (stat(fname, &st) == 0 && access(fname, W_OK) != 0) {
-        snprintf(E.statusmsg, sizeof(E.statusmsg),
+        set_errmsg(
                  "E505: \"%s\" is read-only (use ! to override)", fname);
         return;
     }
 
     FILE *f = fopen(fname, "w");
     if (!f) {
-        snprintf(E.statusmsg, sizeof(E.statusmsg),
+        set_errmsg(
                  "E212: Can't open \"%s\" for writing: %s",
                  fname, strerror(errno));
         return;
@@ -206,6 +206,6 @@ void save_file(const char *fname)
     }
     fclose(f);
     E.dirty = 0;
-    snprintf(E.statusmsg, sizeof(E.statusmsg),
+    set_infomsg(
              "\"%s\" %dL written", fname, E.nlines);
 }

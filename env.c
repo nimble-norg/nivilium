@@ -43,6 +43,7 @@ static void init_vim_colors(void)
     color_set("statusbar", "\x1b[7m");
     color_set("tilde",     "\x1b[2;34m");
     color_set("search",    "\x1b[0;43;30m");
+    color_set("error",     "\x1b[41;1;37m");
 }
 
 static void parse_color_cmd(const char *s)

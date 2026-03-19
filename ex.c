@@ -1,18 +1,27 @@
 #include "vi.h"
 #include <regex.h>
 
-static void ex_out(const char *s)
+static void ex_out_kind(const char *s, int is_err)
 {
     if (E.ex_mode) {
         if (!E.batch_mode) {
-            write(STDOUT_FILENO, s, strlen(s));
-            write(STDOUT_FILENO, "\n", 1);
+            if (is_err)
+                write(STDERR_FILENO, s, strlen(s));
+            else
+                write(STDOUT_FILENO, s, strlen(s));
+            if (is_err)
+                write(STDERR_FILENO, "\n", 1);
+            else
+                write(STDOUT_FILENO, "\n", 1);
         }
     } else {
-        strncpy(E.statusmsg, s, sizeof(E.statusmsg) - 1);
-        E.statusmsg[sizeof(E.statusmsg) - 1] = '\0';
+        snprintf(E.statusmsg, sizeof(E.statusmsg), "%s", s);
+        E.statusmsg_err = is_err;
     }
 }
+
+static void ex_out(const char *s)  { ex_out_kind(s, 0); }
+static void ex_err(const char *s)  { ex_out_kind(s, 1); }
 
 static void ex_outf(const char *fmt, ...)
 {
@@ -24,13 +33,25 @@ static void ex_outf(const char *fmt, ...)
     ex_out(buf);
 }
 
+static void ex_errf(const char *fmt, ...)
+{
+    char    buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    ex_err(buf);
+}
+
 static void flush_status(void)
 {
     if (E.ex_mode && !E.batch_mode && E.statusmsg[0]) {
-        write(STDOUT_FILENO, E.statusmsg, strlen(E.statusmsg));
-        write(STDOUT_FILENO, "\n", 1);
+        int fd = E.statusmsg_err ? STDERR_FILENO : STDOUT_FILENO;
+        write(fd, E.statusmsg, strlen(E.statusmsg));
+        write(fd, "\n", 1);
     }
-    E.statusmsg[0] = '\0';
+    E.statusmsg[0]  = '\0';
+    E.statusmsg_err = 0;
 }
 
 static void print_lines(int line1, int line2, int with_nums)
@@ -136,7 +157,7 @@ static void do_substitute(int line1, int line2,
 
     if (!pat || pat_len == 0) {
         if (E.last_sub_pat_len <= 0) {
-            ex_out("E33: No previous substitute regular expression");
+            ex_err("E33: No previous substitute regular expression");
             return;
         }
         int n = E.last_sub_pat_len < 255 ? E.last_sub_pat_len : 255;
@@ -158,7 +179,7 @@ static void do_substitute(int line1, int line2,
 
     regex_t re;
     if (regcomp(&re, pat_str, REG_EXTENDED) != 0) {
-        ex_out("E383: Invalid search string");
+        ex_err("E383: Invalid search string");
         return;
     }
 
@@ -236,7 +257,7 @@ static void do_substitute(int line1, int line2,
     regfree(&re);
 
     if (total_subs == 0)
-        ex_outf("E486: Pattern not found: %s", pat_str);
+        ex_errf("E486: Pattern not found: %s", pat_str);
     else
         ex_outf("%d substitution%s on %d line%s",
                 total_subs,    total_subs    != 1 ? "s" : "",
@@ -252,7 +273,7 @@ static void do_global(int line1, int line2,
 
     regex_t re;
     if (regcomp(&re, pat_str, REG_EXTENDED) != 0) {
-        ex_out("E383: Invalid search string");
+        ex_err("E383: Invalid search string");
         return;
     }
 
@@ -309,7 +330,7 @@ static void cmd_sub(int line1, int line2, const char *args)
 static void cmd_global(int line1, int line2, const char *args, int invert)
 {
     if (!args || (args[0] != '/' && args[0] != '!' && args[0] != ',')) {
-        ex_out("E488: Trailing characters");
+        ex_err("E488: Trailing characters");
         return;
     }
     char delim = args[0];
@@ -347,7 +368,7 @@ static void cmd_move(int line1, int line2, int dest)
 {
     int n = line2 - line1 + 1;
     if (dest >= line1 && dest <= line2) {
-        ex_out("E134: Move lines into themselves");
+        ex_err("E134: Move lines into themselves");
         return;
     }
     save_undo();
@@ -399,13 +420,10 @@ static void ex_input_lines(int after_line)
     int  ins = after_line;
 
     save_undo();
-    if (!E.batch_mode)
-        write(STDOUT_FILENO,
-              "\t(enter text; press Ctrl-C to finish)\n", 38);
 
     while (1) {
         if (!E.batch_mode)
-            write(STDOUT_FILENO, "\t", 1);
+            write(STDOUT_FILENO, "", 0);
 
         if (!fgets(linebuf, sizeof(linebuf), stdin)) {
             E.sig_int = 0;
@@ -414,6 +432,7 @@ static void ex_input_lines(int after_line)
 
         int l = (int)strlen(linebuf);
         if (l > 0 && linebuf[l - 1] == '\n') linebuf[--l] = '\0';
+        if (l == 1 && linebuf[0] == '.') break;
 
         insert_line_at(ins + 1);
         ins++;
@@ -478,7 +497,7 @@ void dispatch_ex_cmd(const char *raw)
     }
 
     if (s[0] == '!' && s[1] == '\0' && !has_range) {
-        ex_out("E471: Argument required");
+        ex_err("E471: Argument required");
         return;
     }
 
@@ -490,7 +509,7 @@ void dispatch_ex_cmd(const char *raw)
         if (expanded[0] == '\0') {
             if (E.last_bang_cmd[0]) {
                 strncpy(expanded, E.last_bang_cmd, sizeof(expanded) - 1);
-            } else { ex_out("E34: No previous command"); return; }
+            } else { ex_err("E34: No previous command"); return; }
         }
         if (has_range) {
             shell_filter(line1, line2, expanded); flush_status();
@@ -500,15 +519,15 @@ void dispatch_ex_cmd(const char *raw)
         return;
     }
 
-    if (s[0] == 'q' && s[1] == '!') { exit(0); }
+    if (s[0] == 'q' && s[1] == '!') { clean_exit_editor(); }
 
     if ((s[0] == 'q' && (s[1] == '\0' || s[1] == ' '))
         || strncmp(s, "quit!", 5) == 0) {
-        if (strncmp(s, "quit!", 5) == 0) { exit(0); }
+        if (strncmp(s, "quit!", 5) == 0) { clean_exit_editor(); }
         if (E.dirty)
-            ex_out("E37: No write since last change (use :q! to override)");
+            ex_err("E37: No write since last change (use :q! to override)");
         else
-            exit(0);
+            clean_exit_editor();
         return;
     }
 
@@ -523,9 +542,9 @@ void dispatch_ex_cmd(const char *raw)
         if (E.filename[0]) {
             if (E.dirty) save_file(E.filename);
             flush_status();
-            if (!E.dirty) exit(0);
-        } else if (!E.dirty) { exit(0); }
-        else { ex_out("E32: No file name"); }
+            if (!E.dirty) clean_exit_editor();
+        } else if (!E.dirty) { clean_exit_editor(); }
+        else { ex_err("E32: No file name"); }
         return;
     }
 
@@ -538,8 +557,8 @@ void dispatch_ex_cmd(const char *raw)
         }
         if (E.filename[0]) {
             save_file(E.filename); flush_status();
-            if (!E.dirty) exit(0);
-        } else { ex_out("E32: No file name"); }
+            if (!E.dirty) clean_exit_editor();
+        } else { ex_err("E32: No file name"); }
         return;
     }
 
@@ -554,7 +573,7 @@ void dispatch_ex_cmd(const char *raw)
             E.filename[sizeof(E.filename) - 1] = '\0';
         }
         if (E.filename[0]) { save_file(E.filename); flush_status(); }
-        else ex_out("E32: No file name");
+        else ex_err("E32: No file name");
         return;
     }
 
@@ -565,7 +584,7 @@ void dispatch_ex_cmd(const char *raw)
         if (*arg == '!') { force = 1; arg++; }
         while (*arg == ' ') arg++;
         if (E.dirty && !force) {
-            ex_out("E37: No write since last change (use :e! to override)");
+            ex_err("E37: No write since last change (use :e! to override)");
             return;
         }
         for (int i = 0; i < E.nlines; i++) free(E.lines[i].data);
@@ -614,7 +633,7 @@ void dispatch_ex_cmd(const char *raw)
                 flush_status(); return;
             }
             FILE *f = fopen(expanded, "r");
-            if (!f) { ex_outf("E484: Can't open file %s", expanded); return; }
+            if (!f) { ex_errf("E484: Can't open file %s", expanded); return; }
             save_undo();
             char buf[4096];
             int  ins = line2, nlines = 0;
@@ -685,7 +704,7 @@ void dispatch_ex_cmd(const char *raw)
         int c2, dest;
         dest = parse_one_addr(arg, &c2);
         if (c2 > 0) cmd_copy(line1, line2, dest);
-        else         ex_out("E14: Invalid address");
+        else         ex_err("E14: Invalid address");
         return;
     }
 
@@ -696,7 +715,7 @@ void dispatch_ex_cmd(const char *raw)
         int c2, dest;
         dest = parse_one_addr(arg, &c2);
         if (c2 > 0) cmd_move(line1, line2, dest);
-        else         ex_out("E14: Invalid address");
+        else         ex_err("E14: Invalid address");
         return;
     }
 
@@ -901,21 +920,13 @@ void run_ex_mode(void)
             E.sig_int = 0;
             if (E.dirty && !E.batch_mode)
                 write(STDERR_FILENO, "No write since last change\n", 27);
-            exit(0);
+            clean_exit_editor();
         }
 
         int l = (int)strlen(linebuf);
         if (l > 0 && linebuf[l - 1] == '\n') linebuf[--l] = '\0';
 
-        if (l == 0) {
-            if (!E.batch_mode) {
-                if (E.cy + 1 < E.nlines) E.cy++;
-                if (E.lines[E.cy].len > 0)
-                    write(STDOUT_FILENO, E.lines[E.cy].data, E.lines[E.cy].len);
-                write(STDOUT_FILENO, "\n", 1);
-            }
-            continue;
-        }
+        if (l == 0) continue;
 
         dispatch_ex_cmd(linebuf);
     }
