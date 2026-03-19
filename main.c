@@ -12,8 +12,7 @@ static const char *basename_of(const char *path)
 static void print_version(void)
 {
     const char *msg =
-        "vi clone 1.0 (C99/POSIX.1-2008)\n"
-        "Built: " __DATE__ " " __TIME__ "\n";
+	"@(#)NIMBLE-ORG NIVILIUM " __DATE__ ", " __TIME__ "\n";
     write(STDOUT_FILENO, msg, strlen(msg));
     exit(0);
 }
